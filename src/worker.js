@@ -14,7 +14,6 @@ const PBKDF2_ITERATIONS = 120_000;
 let schemaReady = false;
 
 const SCHEMA = `
-PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, login TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL, password_salt TEXT NOT NULL,
@@ -129,7 +128,7 @@ async function api(request, env, url) {
   if (method === 'POST' && path === '/api/change-password') return changePassword(request, env, auth, url);
 
   if (method === 'GET' && path === '/api/locations') return listLocations(env, auth, url);
-  if (method === 'POST' && path === '/api/locations') return createLocation(request, env, auth, url);
+  if (method === 'POST' && path === '/api/locations') return createLocation(request, env, auth);
   if (method === 'PATCH' && path.startsWith('/api/locations/')) return updateLocation(request, env, auth, url, path.split('/').pop());
 
   if (method === 'GET' && path === '/api/users') return listUsers(env, auth, url);
