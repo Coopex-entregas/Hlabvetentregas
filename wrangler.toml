@@ -10,7 +10,7 @@ run_worker_first = ["/api/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "hlabvet-entregas"
-database_id = "COLE_AQUI_O_ID_DO_SEU_D1"
+database_id = e63dd777-6086-4372-a079-ba67500b1b47"
 
 [triggers]
 # Domingo, 00:05 em Fortaleza: fecha automaticamente a semana de segunda a sábado.
