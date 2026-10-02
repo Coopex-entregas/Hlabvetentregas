@@ -5,6 +5,7 @@ const state = {
   view: 'home',
   closingMode: 'week',
   selectedUser: '',
+  dashboardDate: '',
   lastDeliveries: []
 };
 
@@ -116,7 +117,7 @@ async function navigate(view) {
 }
 
 async function renderHome(page) {
-  const today = todayISO();
+  const today = state.me.role === 'admin' ? (state.dashboardDate || todayISO()) : todayISO();
   if (state.me.role === 'admin') {
     const data = await api(`/api/admin/dashboard?date=${today}`);
     const totals = data.cooperados.reduce((sum, row) => ({
@@ -125,15 +126,16 @@ async function renderHome(page) {
       amount: sum.amount + row.day.extra_amount
     }), { deliveries: 0, extras: 0, amount: 0 });
     page.innerHTML = `
-      ${pageHead('Visão de hoje', 'Acompanhe cada cooperado em tempo real.', `<span class="badge badge-success"><span class="dot"></span> Atualizado</span>`)}
+      ${pageHead('Fechamento diário', `Entregas e extras de ${fmtDate(today)}.`, `<span class="badge badge-success"><span class="dot"></span> Atualizado</span>`)}
+      <section class="card"><form id="dashboard-filter" class="toolbar"><div class="field"><label>Escolha o dia</label><input class="input" type="date" name="date" value="${today}" required></div><button class="btn btn-primary" type="submit">Mostrar</button><button class="btn" type="button" data-action="today">Hoje</button></form></section>
       <div class="grid grid-3">
-        ${metric('Entregas de hoje', totals.deliveries, 'Registradas por todos')}
-        ${metric('Extras de hoje', totals.extras, 'Entregas cobradas', 'extra')}
-        ${metric('Valor extra hoje', brl.format(totals.amount), 'Total dos cooperados', 'success')}
+        ${metric('Entregas do dia', totals.deliveries, 'Registradas por todos')}
+        ${metric('Extras do dia', totals.extras, 'Entregas cobradas', 'extra')}
+        ${metric('Valor extra do dia', brl.format(totals.amount), 'Total dos cooperados', 'success')}
       </div>
       <section class="card" style="margin-top:16px">
-        <div class="card-title"><h2>Cooperados hoje</h2><button class="btn btn-small btn-primary" data-nav="launch">+ Lançar</button></div>
-        ${data.cooperados.length ? `<div class="list">${data.cooperados.map(adminPersonCard).join('')}</div>` : empty('Nenhum cooperado ativo', 'Cadastre o primeiro cooperado na aba Cadastros.')}
+        <div class="card-title"><h2>Cooperados no dia</h2><button class="btn btn-small btn-primary" data-nav="launch">+ Lançar</button></div>
+        ${data.cooperados.length ? `<div class="list">${data.cooperados.map(row => adminPersonCard(row, today)).join('')}</div>` : empty('Nenhum cooperado ativo', 'Cadastre o primeiro cooperado na aba Cadastros.')}
       </section>`;
     return;
   }
@@ -143,8 +145,18 @@ async function renderHome(page) {
     api(`/api/month?month=${today.slice(0, 7)}`)
   ]);
   const c = week.calculation;
+  const todayItems = c.items.filter(item => item.delivery_date === today);
+  const dailyExtra = todayItems.reduce((sum,item) => sum + item.extra_value, 0);
+  const dailyCount = todayItems.filter(item => item.is_extra).length;
+  const natalToday = c.items.filter(item => item.delivery_date === today && item.category === 'natal').length;
   page.innerHTML = `
-    ${pageHead(`Olá, ${esc(firstName(state.me.name))}`, `Semana de ${fmtDate(week.week_start)} a ${fmtDate(week.week_end)}.`)}
+    ${pageHead(`Olá, ${esc(firstName(state.me.name))}`, `Semana de ${fmtDate(week.period_start || week.week_start)} a ${fmtDate(week.period_end || week.week_end)}.`)}
+    <section class="card hero-card">
+      <span class="eyebrow">HOJE • ${fmtDate(today)}</span>
+      <div class="hero-value">${brl.format(dailyExtra)}</div>
+      <p>${todayItems.length} entregas • ${dailyCount} extras cobradas hoje</p>
+      <div class="hero-actions"><button class="btn btn-white" data-nav="launch">+ Nova entrega</button><button class="btn" data-action="day-detail" data-date="${today}">Detalhar dia</button></div>
+    </section>
     <section class="card hero-card">
       <span class="eyebrow">TOTAL DA SEMANA</span>
       <div class="hero-value">${brl.format(c.total_amount)}</div>
@@ -157,26 +169,24 @@ async function renderHome(page) {
       ${metric('Extras em R$', brl.format(c.extra_amount), 'Somados ao fixo', 'success')}
     </div>
     <section class="card" style="margin-top:16px">
-      <div class="card-title"><h2>Progresso da semana</h2><span class="badge">Seg a sáb</span></div>
-      <div class="progress-head"><span>Segunda a sexta</span><strong>${c.weekday_used} / ${c.weekday_included} incluídas</strong></div>
-      <div class="progress"><span style="width:${Math.min(100, c.weekday_used / Math.max(1, c.weekday_included) * 100)}%"></span></div>
-      <div class="notice" style="margin-top:15px">A partir da ${c.weekday_included + 1}ª entrega de segunda a sexta, o sistema começa a somar os valores extras conforme o local.</div>
+      <div class="card-title"><h2>Metas de hoje</h2><span class="badge">Reinicia amanhã</span></div>
+      <div class="notice">Natal hoje: <strong>${natalToday}</strong> entregas.<br>Seg–sex: ${c.regional_daily_minimum} de referência para Zona Norte/Macaíba; Natal cobra R$ 10 a partir da ${c.weekday_included + 1}ª entrega de cada dia.<br>Sábado: referência de ${c.weekend_natal_included} entregas. Veja as metas vigentes no fechamento.<br>O limite de hoje não é transferido para amanhã.</div>
     </section>
     <section class="card" style="margin-top:16px">
       <div class="card-title"><h2>Resumo mensal</h2><span class="badge">${monthName(month.month)}</span></div>
       <div class="grid grid-3">
         ${metric('Entregas', month.summary.delivery_count, 'No mês')}
         ${metric('Extras', brl.format(month.summary.extra_amount), `${month.summary.extra_count} entregas`, 'extra')}
-        ${metric('Total', brl.format(month.summary.total_amount), `${month.weeks.length} semanas`, 'success')}
+        ${metric('Total', brl.format(month.summary.total_amount), 'R$ 2.653,32 fixos + extras', 'success')}
       </div>
     </section>`;
 }
 
-function adminPersonCard(row) {
+function adminPersonCard(row, date) {
   const c = row.week.calculation;
   return `<div class="list-item">
-    <div class="person"><div class="avatar">${initials(row.user.name)}</div><div class="list-main"><strong>${esc(row.user.name)}</strong><small>Hoje: ${row.day.delivery_count} entregas • ${row.day.extra_count} extras</small></div></div>
-    <div class="list-value"><strong>${brl.format(c.total_amount)}</strong><small>semana</small></div>
+    <div class="person"><div class="avatar">${initials(row.user.name)}</div><div class="list-main"><strong>${esc(row.user.name)}</strong><small>Dia: ${row.day.delivery_count} entregas • ${row.day.extra_count} extras</small></div></div>
+    <div class="list-value"><strong>${brl.format(c.total_amount)}</strong><small>semana</small><button class="btn btn-small" data-action="day-detail" data-user="${row.user.id}" data-date="${date}">Detalhar dia</button><small>Extras do dia: ${brl.format(row.day.extra_amount)}</small></div>
   </div>`;
 }
 
@@ -207,7 +217,7 @@ function renderLaunch(page) {
 
 function renderDeliveries(page) {
   const today = todayISO();
-  const monthStart = `${today.slice(0, 7)}-01`;
+  const monthStart = today;
   page.innerHTML = `
     ${pageHead('Entregas', 'Consulte qualquer período e veja quanto entrou de extra.')}
     <section class="card">
@@ -219,6 +229,12 @@ function renderDeliveries(page) {
       </form>
       <div id="delivery-results">${loading()}</div>
     </section>`;
+  if (state.detailDate) {
+    const filter = document.querySelector('#delivery-filter');
+    filter.elements.from.value = state.detailDate;
+    filter.elements.to.value = state.detailDate;
+    state.detailDate = '';
+  }
   document.querySelector('#delivery-filter').requestSubmit();
 }
 
@@ -293,9 +309,9 @@ async function loadMonthClosing(month = todayISO().slice(0, 7)) {
     const s = data.summary;
     target.innerHTML = `
       <section class="card"><form id="month-filter" class="toolbar">${state.me.role === 'admin' ? `<div class="field wide"><label>Cooperado</label>${userSelectRaw(state.selectedUser)}</div>` : ''}<div class="field"><label>Mês</label><input class="input" type="month" name="month" value="${month}"></div><div class="toolbar-actions"><button class="btn btn-primary" type="submit">Mostrar</button></div></form><div class="notice ${data.closure ? 'notice-success' : ''}">${data.closure ? `Mês fechado automaticamente em ${fmtDateTime(data.closure.closed_at)}.` : 'O mês fecha automaticamente no primeiro dia do mês seguinte.'}</div></section>
-      <section class="card hero-card" style="margin-top:16px"><span class="eyebrow">${monthName(month).toUpperCase()}</span><div class="hero-value">${brl.format(s.total_amount)}</div><p>${brl.format(s.base_amount)} em semanas + ${brl.format(s.extra_amount)} em extras</p></section>
+      <section class="card hero-card" style="margin-top:16px"><span class="eyebrow">${monthName(month).toUpperCase()}</span><div class="hero-value">${brl.format(s.total_amount)}</div><p>${brl.format(s.base_amount)} fixo mensal (R$ 663,33 × 4) + ${brl.format(s.extra_amount)} em extras</p></section>
       <div class="grid grid-3" style="margin-top:14px">${metric('Entregas', s.delivery_count, 'No mês')}${metric('Extras', s.extra_count, 'Cobradas', 'extra')}${metric('Valor extra', brl.format(s.extra_amount), 'No mês', 'success')}</div>
-      <section class="card" style="margin-top:16px"><div class="card-title"><h2>Semanas do mês</h2><span class="badge">${data.weeks.length}</span></div><div class="list">${data.weeks.map((week) => `<div class="list-item"><div class="list-main"><strong>${fmtDate(week.week_start)} a ${fmtDate(week.week_end)}</strong><small>${week.delivery_count} entregas • ${week.extra_count} extras</small></div><div class="list-value"><strong>${brl.format(week.total_amount)}</strong><small>${week.closed ? 'fechada' : 'em andamento'}</small></div></div>`).join('')}</div></section>`;
+      <section class="card" style="margin-top:16px"><div class="card-title"><h2>Extras por período</h2><span class="badge">Base: 4 semanas</span></div><div class="list">${data.weeks.map((week) => `<div class="list-item"><div class="list-main"><strong>${fmtDate(week.period_start || week.week_start)} a ${fmtDate(week.period_end || week.week_end)}</strong><small>${week.delivery_count} entregas • ${week.extra_count} extras</small></div><div class="list-value"><strong>${brl.format(week.extra_amount)}</strong><small>${week.closed ? 'fechada' : 'em andamento'}</small></div></div>`).join('')}</div></section>`;
   } catch (error) { target.innerHTML = errorCard(error.message); }
 }
 
@@ -321,7 +337,8 @@ function renderManagement(page) {
 async function loadSettingsForm() {
   try {
     const data = await api('/api/settings');
-    document.querySelector('#settings-fields').innerHTML = `<div class="form-grid"><div class="field"><label>Entregas incluídas de segunda a sexta</label><input class="input" type="number" min="0" max="100" name="weekday_included" value="${data.settings.weekday_included}" required></div><div class="field"><label>Entregas de Natal incluídas no sábado</label><input class="input" type="number" min="0" max="100" name="weekend_natal_included" value="${data.settings.weekend_natal_included}" required></div></div><div class="notice">Fora de Natal no sábado é cobrado integralmente. Os valores vêm do cadastro de cada local.</div><button class="btn btn-primary" style="margin-top:15px" type="submit">Salvar regras</button>`;
+    document.querySelector('#settings-fields').innerHTML = `<div class="field"><label>Limite diário de Natal (seg–sex)</label><input class="input" type="number" min="0" max="1000" name="weekday_included" value="${data.settings.weekday_included}" required></div><div class="field"><label>Meta diária para Zona Norte/Macaíba</label><input class="input" type="number" min="0" max="1000" name="regional_daily_minimum" value="${data.settings.regional_daily_minimum}" required></div><div class="field"><label>Meta diária de sábado</label><input class="input" type="number" min="0" max="1000" name="weekend_natal_included" value="${data.settings.weekend_natal_included}" required></div><div class="notice">Os limites reiniciam todo dia. Natal cobra R$ 10 por excedente. Mensal: R$ 2.653,32 fixos + extras.</div><button class="btn btn-primary" style="margin-top:10px" type="submit">Salvar regras</button>`;
+
   } catch (error) { document.querySelector('#settings-fields').innerHTML = errorCard(error.message); }
 }
 
@@ -405,6 +422,9 @@ document.addEventListener('submit', async (event) => {
       form.querySelector('[name="quantity"]').value = 1;
       form.querySelector('[name="notes"]').value = '';
       toast('Entrega salva e cálculo atualizado.');
+    } else if (form.id === 'dashboard-filter') {
+      state.dashboardDate = formData(form).date;
+      await renderHome(document.querySelector('#page'));
     } else if (form.id === 'delivery-filter') {
       await loadDeliveries(form);
     } else if (form.id === 'week-filter') {
@@ -420,7 +440,7 @@ document.addEventListener('submit', async (event) => {
       await api(form.dataset.id ? `/api/locations/${form.dataset.id}` : '/api/locations', { method: form.dataset.id ? 'PATCH' : 'POST', body: data });
       closeModal(); await refreshCore(); toast('Local salvo.'); renderManagement(document.querySelector('#page'));
     } else if (form.id === 'settings-form') {
-      const data = formData(form); data.weekday_included = Number(data.weekday_included); data.weekend_natal_included = Number(data.weekend_natal_included);
+      const data = formData(form); data.weekday_included = Number(data.weekday_included); data.regional_daily_minimum = Number(data.regional_daily_minimum); data.weekend_natal_included = Number(data.weekend_natal_included);
       await api('/api/settings', { method: 'PATCH', body: data }); toast('Regras atualizadas.');
     } else if (form.id === 'edit-delivery-form') {
       const data = formData(form); if (data.value_override === '') data.value_override = null;
@@ -435,11 +455,38 @@ document.addEventListener('click', async (event) => {
   if (nav) return navigate(nav.dataset.nav);
   const target = event.target.closest('[data-action]');
   if (!target) return;
+  if (target.classList.contains('modal-backdrop') && event.target !== target) return;
   const action = target.dataset.action;
   if (action === 'close-modal') closeModal();
   if (action === 'profile') openProfile();
+  if (action === 'today') { state.dashboardDate = ''; await navigate('home'); return; }
+  if (action === 'day-detail') {
+    state.selectedUser = target.dataset.user || state.selectedUser;
+    state.detailDate = target.dataset.date;
+    await navigate('deliveries');
+    return;
+  }
   if (action === 'password') openPasswordModal(false);
-  if (action === 'logout') { await api('/api/logout', { method: 'POST' }); state.me = null; closeModal(); renderAuth(false); }
+  if (action === 'logout') {
+    setBusy(target, true);
+    try {
+      await api('/api/logout', { method: 'POST' });
+      state.me = null;
+      state.users = [];
+      state.locations = [];
+      state.selectedUser = '';
+      state.lastDeliveries = [];
+      state.view = 'home';
+      state.closingMode = 'week';
+      closeModal();
+      renderAuth(false);
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      setBusy(target, false);
+    }
+    return;
+  }
   if (action === 'new-user') openUserModal();
   if (action === 'edit-user') openUserModal(state.users.find((user) => user.id === target.dataset.id));
   if (action === 'new-location') openLocationModal();
@@ -454,7 +501,7 @@ document.addEventListener('click', async (event) => {
     try { await api('/api/week/close', { method: 'POST', body: { date: target.dataset.date, user_id: state.selectedUser } }); toast('Semana fechada com sucesso.'); await loadWeekClosing(target.dataset.date); } catch (error) { toast(error.message, true); }
   }
   if (action === 'export-csv') exportCSV();
-});
+}, true);
 
 async function api(path, options = {}) {
   const init = { method: options.method || 'GET', credentials: 'same-origin', headers: {} };
@@ -466,7 +513,7 @@ async function api(path, options = {}) {
 }
 
 function showModal(content, closable = true) {
-  modalRoot.innerHTML = `<div class="modal-backdrop" ${closable ? 'data-action="close-modal"' : ''}><div class="modal" onclick="event.stopPropagation()"><div class="modal-inner">${content}</div></div></div>`;
+  modalRoot.innerHTML = `<div class="modal-backdrop" ${closable ? 'data-action="close-modal"' : ''}><div class="modal"><div class="modal-inner">${content}</div></div></div>`;
   setTimeout(() => modalRoot.querySelector('input:not([type="hidden"])')?.focus(), 50);
 }
 function closeModal() { modalRoot.innerHTML = ''; }
@@ -479,7 +526,7 @@ function metric(label, value, hint, type = '') { return `<div class="card metric
 function empty(title, text) { return `<div class="empty"><span class="empty-icon">◌</span><strong>${title}</strong><span>${text}</span></div>`; }
 function loading() { return `<div class="loading"><span class="spinner"></span><span>Carregando...</span></div>`; }
 function errorCard(message) { return `<div class="notice notice-danger">${esc(message)}</div>`; }
-function dayCard(day) { return `<div class="card day-card"><div class="day-head"><strong>${weekday.format(new Date(`${day.date}T12:00:00Z`))}</strong><span class="badge">${day.delivery_count}</span></div><div class="day-stats"><div class="day-stat"><span>Entregas</span><b>${day.delivery_count}</b></div><div class="day-stat"><span>Extras</span><b>${day.extra_count}</b></div><div class="day-stat"><span>Valor</span><b>${brl.format(day.extra_amount)}</b></div></div></div>`; }
+function dayCard(day) { return `<div class="card day-card"><div class="day-head"><strong>${weekday.format(new Date(`${day.date}T12:00:00Z`))}</strong><span class="badge">${day.delivery_count}</span></div><div class="day-stats"><div class="day-stat"><span>Entregas</span><b>${day.delivery_count}</b></div><div class="day-stat"><span>Extras</span><b>${day.extra_count}</b></div><div class="day-stat"><span>Valor</span><b>${brl.format(day.extra_amount)}</b></div></div><button class="btn btn-small" data-action="day-detail" data-date="${day.date}">Detalhar dia</button></div>`; }
 function userSelect(selected, withField = false) { const raw = userSelectRaw(selected); return withField ? `<div class="field"><label>Cooperado</label>${raw}</div>` : raw; }
 function userSelectRaw(selected) { return `<select class="select" name="user_id" required><option value="">Selecione</option>${state.users.filter((user) => user.active || user.id === selected).map((user) => `<option value="${user.id}" ${user.id === selected ? 'selected' : ''}>${esc(user.name)}</option>`).join('')}</select>`; }
 function locationOption(location) { return `<option value="${location.id}">${esc(location.name)} — ${brl.format(location.weekday_value)}</option>`; }
@@ -500,3 +547,14 @@ function exportCSV() {
   const csv = '\ufeff' + lines.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(';')).join('\n');
   const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); link.download = `hlabvet-entregas-${todayISO()}.csv`; link.click(); URL.revokeObjectURL(link.href);
 }
+
+// Atualiza a data ao retornar ao aplicativo, respeitando o filtro do admin.
+let lastVisibleDate = todayISO();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !state.me) return;
+  const date = todayISO();
+  if (date !== lastVisibleDate) {
+    lastVisibleDate = date;
+    if (state.view === 'home' && !state.dashboardDate) navigate('home');
+  }
+});
