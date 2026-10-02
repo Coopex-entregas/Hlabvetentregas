@@ -1,6 +1,9 @@
-name = "hlabvet-entregas"
+name = "hlabvetentregas"
 main = "src/worker.js"
 compatibility_date = "2026-10-02"
+
+workers_dev = true
+preview_urls = true
 
 [assets]
 directory = "./public"
@@ -13,9 +16,9 @@ database_name = "hlabvet-entregas"
 database_id = "e63dd777-6086-4372-a079-ba67500b1b47"
 
 [triggers]
-# Domingo, 00:05 em Fortaleza: fecha automaticamente a semana de segunda a sábado.
-# Dia 1, 00:10 em Fortaleza: registra o fechamento do mês anterior.
-crons = ["5 3 * * 0", "10 3 1 * *"]
+# Domingo, 00:05 em Fortaleza: fecha a semana de segunda a sábado.
+# Dia 1, 00:10 em Fortaleza: fecha o mês anterior.
+crons = ["5 3 * * SUN", "10 3 1 * *"]
 
 [vars]
 APP_TIMEZONE = "America/Fortaleza"
