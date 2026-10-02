@@ -16,8 +16,10 @@ database_name = "hlabvet-entregas"
 database_id = "e63dd777-6086-4372-a079-ba67500b1b47"
 
 [triggers]
-# Domingo, 00:05 em Fortaleza: fecha a semana de segunda a sábado.
-# Dia 1, 00:10 em Fortaleza: fecha o mês anterior.
+# Domingo às 00:05 em Fortaleza:
+# fecha a semana de segunda a sábado.
+# Dia 1 às 00:10 em Fortaleza:
+# fecha o mês anterior.
 crons = ["5 3 * * SUN", "10 3 1 * *"]
 
 [vars]
