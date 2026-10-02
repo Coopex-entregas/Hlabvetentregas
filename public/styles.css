@@ -398,3 +398,19 @@ tr:last-child td { border-bottom: 0; }
   .toolbar .field.wide, .toolbar-actions { grid-column: 1 / -1; }
   .toolbar-actions .btn { flex: 1; }
 }
+
+/* Aplicativo: evita deslocar a página lateralmente. */
+html,body{overscroll-behavior:none;max-width:100%;overflow-x:hidden}
+button{touch-action:manipulation}
+@media(max-width:700px){
+ .app-shell{position:fixed;inset:0;height:100dvh}
+ .topbar,.bottom-nav{flex-shrink:0}
+ .content{overscroll-behavior:contain}
+ .topbar .brand-mark{width:34px;height:34px;border-radius:11px;font-size:18px}
+ .list-value{display:grid;justify-items:end;gap:5px;max-width:48%}
+ .person{min-width:0}.avatar{flex-shrink:0}
+ .hero-actions{display:flex;flex-wrap:wrap;gap:8px}
+ .grid-3 .metric-value{font-size:clamp(13px,4vw,20px)}
+ .modal-backdrop{padding:10px;overscroll-behavior:contain}
+ .auth-page{padding:16px;min-width:0}.auth-card{padding:18px}
+}
