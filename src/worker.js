@@ -549,14 +549,20 @@ async function runAutomaticClosures(cron, env) {
   await ensureSchema(env.DB);
   const users = await env.DB.prepare(`SELECT id FROM users WHERE role='cooperado' AND active=1`).all();
   const today = fortalezaDate();
-  if (cron === '5 3 * * 0') {
+
+  if (cron === '5 3 * * SUN') {
     const previousSaturday = addDays(today, -1);
-    for (const user of users.results) await persistWeekClosure(env.DB, user.id, previousSaturday, null);
+    for (const user of users.results) {
+      await persistWeekClosure(env.DB, user.id, previousSaturday, null);
+    }
   }
+
   if (cron === '10 3 1 * *') {
     const previousMonthDate = addDays(`${today.slice(0, 7)}-01`, -1);
     const month = previousMonthDate.slice(0, 7);
-    for (const user of users.results) await persistMonthClosure(env.DB, user.id, month);
+    for (const user of users.results) {
+      await persistMonthClosure(env.DB, user.id, month);
+    }
   }
 }
 
@@ -620,8 +626,8 @@ async function authenticate(request, db) {
   const token = parseCookies(request.headers.get('Cookie') || '').hlabvet_session;
   if (!token) return null;
   const sessionId = await sha256(token);
-  const row = await db.prepare(`SELECT s.id AS session_id,s.expires_at,u.* FROM sessions s
-    JOIN users u ON u.id=s.user_id WHERE s.id=?`).bind(sessionId).first();
+  const row = await db.prepare(`SELECT s.id AS session_id,s.expires_at,u.*
+    FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=?`).bind(sessionId).first();
   if (!row || !row.active || row.expires_at <= new Date().toISOString()) return null;
   return { sessionId: row.session_id, user: row };
 }
@@ -646,7 +652,12 @@ function sessionCookie(token, url, maxAge) {
 async function passwordHash(password, suppliedSalt) {
   const saltBytes = suppliedSalt ? fromBase64(suppliedSalt) : crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: saltBytes, iterations: PBKDF2_ITERATIONS }, key, 256);
+  const bits = await crypto.subtle.deriveBits({
+    name: 'PBKDF2',
+    hash: 'SHA-256',
+    salt: saltBytes,
+    iterations: PBKDF2_ITERATIONS
+  }, key, 256);
   return { hash: toBase64(new Uint8Array(bits)), salt: toBase64(saltBytes) };
 }
 
@@ -658,7 +669,9 @@ async function verifyPassword(password, user) {
 function timingSafeEqual(a, b) {
   if (a.length !== b.length) return false;
   let difference = 0;
-  for (let index = 0; index < a.length; index += 1) difference |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  for (let index = 0; index < a.length; index += 1) {
+    difference |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  }
   return difference === 0;
 }
 
@@ -668,7 +681,8 @@ async function sha256(value) {
 }
 
 function randomHex(size) {
-  return [...crypto.getRandomValues(new Uint8Array(size))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return [...crypto.getRandomValues(new Uint8Array(size))]
+    .map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function toBase64(bytes) {
@@ -684,7 +698,11 @@ function fromBase64(value) {
 async function readBody(request) {
   const type = request.headers.get('content-type') || '';
   if (!type.includes('application/json')) throw new HttpError(415, 'Envie os dados no formato correto.');
-  try { return await request.json(); } catch { throw new HttpError(400, 'Dados inválidos.'); }
+  try {
+    return await request.json();
+  } catch {
+    throw new HttpError(400, 'Dados inválidos.');
+  }
 }
 
 function validateLocation(body) {
@@ -693,7 +711,8 @@ function validateLocation(body) {
   const category = ['natal', 'zona_norte', 'fora_natal'].includes(body.category) ? body.category : null;
   if (!category) throw new HttpError(400, 'Selecione a categoria do local.');
   return {
-    name, category,
+    name,
+    category,
     weekday_value: validMoney(body.weekday_value, 'Valor de segunda a sexta inválido.'),
     weekend_value: validMoney(body.weekend_value, 'Valor de sábado inválido.'),
     sort_order: validInteger(body.sort_order ?? 100, 0, 9999, 'Ordem inválida.')
@@ -707,7 +726,8 @@ function validatePassword(password) {
 }
 
 function normalizeLogin(value) {
-  return String(value || '').trim().toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9._-]/g, '').slice(0, 40);
+  return String(value || '').trim().toLowerCase()
+    .replace(/\s+/g, '.').replace(/[^a-z0-9._-]/g, '').slice(0, 40);
 }
 
 function cleanText(value, max) {
@@ -737,13 +757,17 @@ function validateBillingMode(value) {
 
 function validMoney(value, message) {
   const number = Number(value);
-  if (!Number.isFinite(number) || number < 0 || number > 1_000_000) throw new HttpError(400, message);
+  if (!Number.isFinite(number) || number < 0 || number > 1_000_000) {
+    throw new HttpError(400, message);
+  }
   return money(number);
 }
 
 function validInteger(value, min, max, message) {
   const number = Number(value);
-  if (!Number.isInteger(number) || number < min || number > max) throw new HttpError(400, message);
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw new HttpError(400, message);
+  }
   return number;
 }
 
@@ -753,55 +777,85 @@ function requireAdmin(auth) {
 
 function publicUser(user) {
   return {
-    id: user.id, name: user.name, login: user.login, role: user.role,
+    id: user.id,
+    name: user.name,
+    login: user.login,
+    role: user.role,
     weekly_base_amount: money(user.weekly_base_amount),
     must_change_password: Boolean(user.must_change_password),
-    active: Boolean(user.active), created_at: user.created_at, updated_at: user.updated_at
+    active: Boolean(user.active),
+    created_at: user.created_at,
+    updated_at: user.updated_at
   };
 }
 
 function publicLocation(location) {
   return {
-    id: location.id, name: location.name, category: location.category,
-    weekday_value: money(location.weekday_value), weekend_value: money(location.weekend_value),
-    active: Boolean(location.active), sort_order: Number(location.sort_order)
+    id: location.id,
+    name: location.name,
+    category: location.category,
+    weekday_value: money(location.weekday_value),
+    weekend_value: money(location.weekend_value),
+    active: Boolean(location.active),
+    sort_order: Number(location.sort_order)
   };
 }
 
 function publicClosure(row) {
   return {
-    id: row.id, closed_at: row.closed_at, updated_at: row.updated_at,
-    delivery_count: Number(row.delivery_count), extra_count: Number(row.extra_count),
-    base_amount: money(row.base_amount), extra_amount: money(row.extra_amount), total_amount: money(row.total_amount)
+    id: row.id,
+    closed_at: row.closed_at,
+    updated_at: row.updated_at,
+    delivery_count: Number(row.delivery_count),
+    extra_count: Number(row.extra_count),
+    base_amount: money(row.base_amount),
+    extra_amount: money(row.extra_amount),
+    total_amount: money(row.total_amount)
   };
 }
 
 function stripWeekItems(week) {
   const { items: _items, ...calculation } = week.calculation;
   return {
-    user: week.user, week_start: week.week_start, week_end: week.week_end,
-    calculation, days: week.days, closure: week.closure
+    user: week.user,
+    week_start: week.week_start,
+    week_end: week.week_end,
+    calculation,
+    days: week.days,
+    closure: week.closure
   };
 }
 
 function parseCookies(header) {
-  return Object.fromEntries(header.split(';').map((part) => part.trim().split(/=(.*)/s).slice(0, 2)).filter(([key]) => key));
+  return Object.fromEntries(header.split(';')
+    .map((part) => part.trim().split(/=(.*)/s).slice(0, 2))
+    .filter(([key]) => key));
 }
 
 function fortalezaDate() {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Fortaleza', year: 'numeric', month: '2-digit', day: '2-digit'
+    timeZone: 'America/Fortaleza',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
   }).format(new Date());
 }
 
 function fortalezaWeekday() {
-  const name = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Fortaleza', weekday: 'short' }).format(new Date());
+  const name = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Fortaleza',
+    weekday: 'short'
+  }).format(new Date());
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(name);
 }
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers }
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      ...headers
+    }
   });
 }
