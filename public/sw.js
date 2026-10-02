@@ -1,5 +1,5 @@
-const CACHE = 'hlabvet-entregas-v1';
-const SHELL = ['/', '/styles.css', '/app.js', '/manifest.webmanifest'];
+const CACHE = 'hlabvet-entregas-diario-v4';
+const SHELL = ['/', '/styles.css', '/app.js', '/mobile.js', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
