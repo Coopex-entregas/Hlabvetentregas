@@ -10,7 +10,7 @@ import {
 
 const APP_NAME = 'HLabVet Entregas';
 const SESSION_DAYS = 30;
-const PBKDF2_ITERATIONS = 120_000;
+const PBKDF2_ITERATIONS = 100_000;
 
 let schemaReady = false;
 
