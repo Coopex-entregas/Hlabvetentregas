@@ -1,0 +1,10 @@
+{
+  "name": "HLabVet Entregas",
+  "short_name": "HLabVet",
+  "description": "Controle de entregas, extras e fechamentos.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f4fe",
+  "theme_color": "#6f3cc3",
+  "icons": []
+}

@@ -1,0 +1,18 @@
+{
+  "name": "hlabvet-entregas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Controle móvel de entregas, extras e fechamentos do HLabVet.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create hlabvet-entregas",
+    "db:init:local": "wrangler d1 execute hlabvet-entregas --local --file=./schema.sql",
+    "db:init:remote": "wrangler d1 execute hlabvet-entregas --remote --file=./schema.sql",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "wrangler": "^4.42.0"
+  }
+}
