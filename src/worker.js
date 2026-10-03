@@ -71,7 +71,7 @@ INSERT OR IGNORE INTO settings(key, value, updated_at) VALUES
 INSERT OR IGNORE INTO locations(id,name,category,weekday_value,weekend_value,active,sort_order,created_at,updated_at) VALUES
  ('loc-natal','Natal','natal',10,10,1,10,datetime('now'),datetime('now')),
  ('loc-zona-norte','Zona Norte de Natal','zona_norte',20,20,1,20,datetime('now'),datetime('now')),
- ('loc-parnamirim','Parnamirim','fora_natal',15,15,1,30,datetime('now'),datetime('now')),
+ ('loc-parnamirim','Parnamirim','fora_natal',20,20,1,30,datetime('now'),datetime('now')),
  ('loc-macaiba','Macaíba','fora_natal',30,30,1,40,datetime('now'),datetime('now')),
  ('loc-sao-jose','São José de Mipibu','fora_natal',50,50,1,50,datetime('now'),datetime('now')),
  ('loc-cajupiranga','Cajupiranga','fora_natal',30,30,1,60,datetime('now'),datetime('now'));
