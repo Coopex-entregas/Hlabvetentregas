@@ -89,10 +89,8 @@ export function calculateWeek(deliveries, options = {}) {
     const fallbackIncluded = Math.max(0, regionalMinimum - period.natal);
     let rate = money(delivery.value_override ??
       (isWeekend ? delivery.weekend_value : delivery.weekday_value) ?? 0);
-    // Estes valores também corrigem cadastros antigos com Natal/Parnamirim a R$ 20.
+    // Natal excedente segue a regra de R$ 10. Demais locais usam a taxa cadastrada.
     if (kind === 'natal') rate = 10;
-    if (kind === 'parnamirim') rate = 15;
-    if (kind === 'sao_jose') rate = 50;
     let charge = false;
     let reason = '';
     if (kind === 'natal') {
