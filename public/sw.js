@@ -1,4 +1,4 @@
-const CACHE = 'hlabvet-entregas-gastos-v5';
+const CACHE = 'hlabvet-entregas-liquido-v6';
 const SHELL = ['/', '/styles.css', '/app.js', '/expenses.js', '/mobile.js', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
