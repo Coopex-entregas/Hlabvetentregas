@@ -75,12 +75,28 @@ CREATE TABLE IF NOT EXISTS cooperado_expense_items (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cooperado_expense_entries (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expense_date TEXT NOT NULL,
+  km REAL NOT NULL,
+  liters REAL NOT NULL,
+  fuel_cost REAL NOT NULL,
+  maintenance_cost REAL NOT NULL,
+  total_cost REAL NOT NULL,
+  cost_per_km REAL NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(user_id, expense_date)
+);
 CREATE INDEX IF NOT EXISTS idx_deliveries_user_date ON deliveries(user_id, delivery_date);
 CREATE INDEX IF NOT EXISTS idx_deliveries_date ON deliveries(delivery_date);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_weekly_user_end ON weekly_closures(user_id, week_end);
 CREATE INDEX IF NOT EXISTS idx_monthly_user_month ON monthly_closures(user_id, month);
 CREATE INDEX IF NOT EXISTS idx_expense_items_user_order ON cooperado_expense_items(user_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_expense_entries_user_date ON cooperado_expense_entries(user_id, expense_date);
 INSERT OR IGNORE INTO settings(key, value, updated_at) VALUES
  ('weekday_included', '6', datetime('now')),
  ('natal_daily_limit', '15', datetime('now')),
@@ -179,6 +195,9 @@ async function api(request, env, url) {
 
   if (method === 'GET' && path === '/api/expenses') return getCooperadoExpenses(env, auth);
   if (method === 'PUT' && path === '/api/expenses') return saveCooperadoExpenses(request, env, auth);
+  if (method === 'GET' && path === '/api/expenses/month') return getCooperadoExpenseMonth(env, auth, url);
+  if (method === 'POST' && path === '/api/expenses/entries') return saveCooperadoExpenseEntry(request, env, auth);
+  if (method === 'DELETE' && path.startsWith('/api/expenses/entries/')) return deleteCooperadoExpenseEntry(env, auth, path.split('/').pop());
 
   if (method === 'GET' && path === '/api/locations') return listLocations(env, auth, url);
   if (method === 'POST' && path === '/api/locations') return createLocation(request, env, auth);
@@ -265,64 +284,46 @@ const DEFAULT_EXPENSE_ITEMS = [
 ];
 
 function requireCooperado(auth) {
-  if (auth.user.role !== 'cooperado') {
-    throw new HttpError(403, 'Esta área é exclusiva do cooperado.');
-  }
+  if (auth.user.role !== 'cooperado') throw new HttpError(403, 'Esta área é exclusiva do cooperado.');
 }
 
 async function ensureCooperadoExpenseDefaults(db, userId) {
-  const existing = await db.prepare(
-    'SELECT user_id FROM cooperado_expense_profiles WHERE user_id=?'
-  ).bind(userId).first();
-
+  const existing = await db.prepare('SELECT user_id FROM cooperado_expense_profiles WHERE user_id=?').bind(userId).first();
   if (existing) return;
-
   const now = new Date().toISOString();
   const statements = [
     db.prepare(`INSERT INTO cooperado_expense_profiles
       (user_id,fuel_km_per_liter,fuel_price,last_km,updated_at)
       VALUES(?,35,0,0,?)`).bind(userId, now)
   ];
-
   DEFAULT_EXPENSE_ITEMS.forEach((item, index) => {
-    statements.push(
-      db.prepare(`INSERT INTO cooperado_expense_items
-        (id,user_id,name,item_value,life_km,sort_order,created_at,updated_at)
-        VALUES(?,?,?,0,?,?,?,?)`)
-        .bind(crypto.randomUUID(), userId, item.name, item.life_km, (index + 1) * 10, now, now)
-    );
+    statements.push(db.prepare(`INSERT INTO cooperado_expense_items
+      (id,user_id,name,item_value,life_km,sort_order,created_at,updated_at)
+      VALUES(?,?,?,0,?,?,?,?)`)
+      .bind(crypto.randomUUID(), userId, item.name, item.life_km, (index + 1) * 10, now, now));
   });
-
   await db.batch(statements);
 }
 
 async function getCooperadoExpenses(env, auth) {
   requireCooperado(auth);
   await ensureCooperadoExpenseDefaults(env.DB, auth.user.id);
-
   const [profile, items] = await Promise.all([
-    env.DB.prepare(`SELECT fuel_km_per_liter,fuel_price,last_km,updated_at
-      FROM cooperado_expense_profiles WHERE user_id=?`)
-      .bind(auth.user.id).first(),
+    env.DB.prepare(`SELECT fuel_km_per_liter,fuel_price,updated_at
+      FROM cooperado_expense_profiles WHERE user_id=?`).bind(auth.user.id).first(),
     env.DB.prepare(`SELECT id,name,item_value,life_km,sort_order
-      FROM cooperado_expense_items WHERE user_id=?
-      ORDER BY sort_order,name COLLATE NOCASE`)
+      FROM cooperado_expense_items WHERE user_id=? ORDER BY sort_order,name COLLATE NOCASE`)
       .bind(auth.user.id).all()
   ]);
-
   return json({
     profile: {
       fuel_km_per_liter: Number(profile?.fuel_km_per_liter || 35),
       fuel_price: Number(profile?.fuel_price || 0),
-      last_km: Number(profile?.last_km || 0),
       updated_at: profile?.updated_at || null
     },
     items: items.results.map((item) => ({
-      id: item.id,
-      name: item.name,
-      value: money(item.item_value),
-      life_km: Number(item.life_km),
-      sort_order: Number(item.sort_order)
+      id: item.id, name: item.name, value: money(item.item_value),
+      life_km: Number(item.life_km), sort_order: Number(item.sort_order)
     }))
   });
 }
@@ -330,35 +331,18 @@ async function getCooperadoExpenses(env, auth) {
 async function saveCooperadoExpenses(request, env, auth) {
   requireCooperado(auth);
   const body = await readBody(request);
-
-  const fuelKmPerLiter = validPositiveNumber(
-    body.fuel_km_per_liter, 0.1, 500, 'Consumo da moto inválido.'
-  );
-  const fuelPrice = validNonNegativeNumber(
-    body.fuel_price, 0, 1000, 'Valor do combustível inválido.'
-  );
-  const lastKm = validNonNegativeNumber(
-    body.last_km ?? 0, 0, 10_000_000, 'Quilometragem informada inválida.'
-  );
-
-  if (!Array.isArray(body.items)) {
-    throw new HttpError(400, 'A lista de itens é inválida.');
-  }
-  if (body.items.length > 100) {
-    throw new HttpError(400, 'Você pode cadastrar no máximo 100 itens.');
-  }
+  const fuelKmPerLiter = validPositiveNumber(body.fuel_km_per_liter, 0.1, 500, 'Consumo da moto inválido.');
+  const fuelPrice = validNonNegativeNumber(body.fuel_price, 0, 1000, 'Valor do combustível inválido.');
+  if (!Array.isArray(body.items)) throw new HttpError(400, 'A lista de itens é inválida.');
+  if (body.items.length > 100) throw new HttpError(400, 'Você pode cadastrar no máximo 100 itens.');
 
   const items = body.items.map((item, index) => {
     const name = cleanText(item?.name, 80);
     if (!name) throw new HttpError(400, `Informe o nome do item ${index + 1}.`);
     return {
       name,
-      value: validNonNegativeNumber(
-        item?.value ?? 0, 0, 1_000_000, `Valor inválido no item "${name}".`
-      ),
-      life_km: validPositiveNumber(
-        item?.life_km, 1, 10_000_000, `Duração em km inválida no item "${name}".`
-      ),
+      value: validNonNegativeNumber(item?.value ?? 0, 0, 1_000_000, `Valor inválido no item "${name}".`),
+      life_km: validPositiveNumber(item?.life_km, 1, 10_000_000, `Duração em km inválida no item "${name}".`),
       sort_order: (index + 1) * 10
     };
   });
@@ -367,31 +351,116 @@ async function saveCooperadoExpenses(request, env, auth) {
   const statements = [
     env.DB.prepare(`INSERT INTO cooperado_expense_profiles
       (user_id,fuel_km_per_liter,fuel_price,last_km,updated_at)
-      VALUES(?,?,?,?,?)
+      VALUES(?,?,?,0,?)
       ON CONFLICT(user_id) DO UPDATE SET
         fuel_km_per_liter=excluded.fuel_km_per_liter,
-        fuel_price=excluded.fuel_price,
-        last_km=excluded.last_km,
-        updated_at=excluded.updated_at`)
-      .bind(auth.user.id, fuelKmPerLiter, fuelPrice, lastKm, now),
-    env.DB.prepare('DELETE FROM cooperado_expense_items WHERE user_id=?')
-      .bind(auth.user.id)
+        fuel_price=excluded.fuel_price,last_km=0,updated_at=excluded.updated_at`)
+      .bind(auth.user.id, fuelKmPerLiter, fuelPrice, now),
+    env.DB.prepare('DELETE FROM cooperado_expense_items WHERE user_id=?').bind(auth.user.id)
   ];
-
   for (const item of items) {
-    statements.push(
-      env.DB.prepare(`INSERT INTO cooperado_expense_items
-        (id,user_id,name,item_value,life_km,sort_order,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?)`)
-        .bind(
-          crypto.randomUUID(), auth.user.id, item.name, item.value,
-          item.life_km, item.sort_order, now, now
-        )
-    );
+    statements.push(env.DB.prepare(`INSERT INTO cooperado_expense_items
+      (id,user_id,name,item_value,life_km,sort_order,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(), auth.user.id, item.name, item.value, item.life_km, item.sort_order, now, now));
   }
-
   await env.DB.batch(statements);
   return getCooperadoExpenses(env, auth);
+}
+
+async function calculateExpenseSnapshot(db, userId, km) {
+  await ensureCooperadoExpenseDefaults(db, userId);
+  const [profile, items] = await Promise.all([
+    db.prepare('SELECT fuel_km_per_liter,fuel_price FROM cooperado_expense_profiles WHERE user_id=?').bind(userId).first(),
+    db.prepare('SELECT name,item_value,life_km FROM cooperado_expense_items WHERE user_id=? ORDER BY sort_order').bind(userId).all()
+  ]);
+  const kmPerLiter = Number(profile?.fuel_km_per_liter || 35);
+  const fuelPrice = Number(profile?.fuel_price || 0);
+  const liters = kmPerLiter > 0 ? km / kmPerLiter : 0;
+  const fuelCost = money(liters * fuelPrice);
+  const maintenanceItems = items.results.map((item) => {
+    const value = Number(item.item_value || 0);
+    const lifeKm = Number(item.life_km || 1);
+    const costPerKm = value / lifeKm;
+    return { name:item.name, value:money(value), life_km:lifeKm, cost_per_km:costPerKm, trip_cost:money(costPerKm * km) };
+  });
+  const maintenanceCost = money(maintenanceItems.reduce((s, i) => s + Number(i.trip_cost || 0), 0));
+  const totalCost = money(fuelCost + maintenanceCost);
+  return {
+    km, km_per_liter:kmPerLiter, fuel_price:fuelPrice, liters,
+    fuel_cost:fuelCost, maintenance_cost:maintenanceCost, total_cost:totalCost,
+    cost_per_km:km > 0 ? totalCost / km : 0, maintenance_items:maintenanceItems
+  };
+}
+
+async function saveCooperadoExpenseEntry(request, env, auth) {
+  requireCooperado(auth);
+  const body = await readBody(request);
+  const expenseDate = validateDate(body.expense_date || fortalezaDate());
+  const km = validPositiveNumber(body.km, 0.1, 100000, 'Informe uma quilometragem maior que zero.');
+  const snapshot = await calculateExpenseSnapshot(env.DB, auth.user.id, km);
+  const now = new Date().toISOString();
+  const existing = await env.DB.prepare(
+    'SELECT id,created_at FROM cooperado_expense_entries WHERE user_id=? AND expense_date=?'
+  ).bind(auth.user.id, expenseDate).first();
+  const id = existing?.id || crypto.randomUUID();
+  const createdAt = existing?.created_at || now;
+
+  await env.DB.prepare(`INSERT INTO cooperado_expense_entries
+    (id,user_id,expense_date,km,liters,fuel_cost,maintenance_cost,total_cost,cost_per_km,snapshot_json,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(user_id,expense_date) DO UPDATE SET
+      km=excluded.km,liters=excluded.liters,fuel_cost=excluded.fuel_cost,
+      maintenance_cost=excluded.maintenance_cost,total_cost=excluded.total_cost,
+      cost_per_km=excluded.cost_per_km,snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at`)
+    .bind(id, auth.user.id, expenseDate, snapshot.km, snapshot.liters, snapshot.fuel_cost,
+      snapshot.maintenance_cost, snapshot.total_cost, snapshot.cost_per_km,
+      JSON.stringify(snapshot), createdAt, now).run();
+
+  return json({ ok:true, entry:{ id, expense_date:expenseDate, ...snapshot, updated:Boolean(existing) } }, existing ? 200 : 201);
+}
+
+async function deleteCooperadoExpenseEntry(env, auth, id) {
+  requireCooperado(auth);
+  const row = await env.DB.prepare('SELECT id FROM cooperado_expense_entries WHERE id=? AND user_id=?').bind(id, auth.user.id).first();
+  if (!row) throw new HttpError(404, 'Lançamento não encontrado.');
+  await env.DB.prepare('DELETE FROM cooperado_expense_entries WHERE id=? AND user_id=?').bind(id, auth.user.id).run();
+  return json({ ok:true });
+}
+
+async function getCooperadoExpenseMonth(env, auth, url) {
+  requireCooperado(auth);
+  const month = validateMonth(url.searchParams.get('month') || fortalezaDate().slice(0, 7));
+  const range = calendarMonthRange(month);
+  const result = await env.DB.prepare(`SELECT id,expense_date,km,liters,fuel_cost,maintenance_cost,total_cost,cost_per_km
+    FROM cooperado_expense_entries WHERE user_id=? AND expense_date BETWEEN ? AND ?
+    ORDER BY expense_date DESC,created_at DESC`).bind(auth.user.id, range.start, range.end).all();
+
+  const totals = result.results.reduce((s, e) => {
+    s.km += Number(e.km || 0); s.liters += Number(e.liters || 0);
+    s.fuel_cost += Number(e.fuel_cost || 0); s.maintenance_cost += Number(e.maintenance_cost || 0);
+    s.total_cost += Number(e.total_cost || 0); return s;
+  }, { km:0, liters:0, fuel_cost:0, maintenance_cost:0, total_cost:0 });
+  totals.fuel_cost = money(totals.fuel_cost);
+  totals.maintenance_cost = money(totals.maintenance_cost);
+  totals.total_cost = money(totals.total_cost);
+  totals.cost_per_km = totals.km > 0 ? totals.total_cost / totals.km : 0;
+
+  const monthClosing = await buildMonth(env.DB, auth.user.id, month);
+  const gross = money(monthClosing.summary.total_amount);
+  return json({
+    month, from:range.start, to:range.end,
+    entries:result.results.map((e)=>({
+      id:e.id, expense_date:e.expense_date, km:Number(e.km), liters:Number(e.liters),
+      fuel_cost:money(e.fuel_cost), maintenance_cost:money(e.maintenance_cost),
+      total_cost:money(e.total_cost), cost_per_km:Number(e.cost_per_km || 0)
+    })),
+    summary:{
+      gross_amount:gross, km:totals.km, liters:totals.liters, fuel_cost:totals.fuel_cost,
+      maintenance_cost:totals.maintenance_cost, total_cost:totals.total_cost,
+      cost_per_km:totals.cost_per_km, net_amount:money(gross - totals.total_cost)
+    }
+  });
 }
 
 async function listUsers(env, auth) {
